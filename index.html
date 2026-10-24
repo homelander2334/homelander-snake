@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="theme-color" content="#090d16">
+  <title>Homelander Snake</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: #090d16;
+      color: #f4f7fb;
+      font-family: system-ui, sans-serif;
+      display: flex;
+      justify-content: center;
+      padding: 20px 12px;
+    }
+    main { width: 100%; max-width: 440px; text-align: center; }
+    h1 { margin: 4px 0; font-size: 30px; letter-spacing: 1px; }
+    h1 span { color: #57f287; }
+    .subtitle { color: #9aa8bd; margin: 4px 0 18px; font-size: 14px; }
+    .scores { display: flex; gap: 10px; margin-bottom: 14px; }
+    .score {
+      flex: 1; padding: 12px 8px; border: 1px solid #263248;
+      background: #111827; border-radius: 12px;
+    }
+    .score small { display: block; color: #9aa8bd; font-size: 12px; }
+    .score strong { display: block; font-size: 25px; color: #57f287; }
+    .board {
+      position: relative; width: 100%; aspect-ratio: 1;
+      background: #0c1420; border: 2px solid #263248;
+      border-radius: 12px; overflow: hidden;
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    #message {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 8px;
+      background: #090d16dd; padding: 20px;
+    }
+    #message strong { font-size: 25px; }
+    #message span { color: #c1ccdc; font-size: 14px; }
+    button {
+      border: 0; border-radius: 12px; padding: 13px 18px;
+      color: #07110b; background: #57f287; font-weight: 800;
+      font-size: 15px; cursor: pointer; touch-action: manipulation;
+    }
+    .main-button { width: 100%; margin-top: 14px; }
+    .controls {
+      width: 204px; margin: 18px auto 0;
+      display: grid; grid-template-columns: repeat(3, 64px);
+      grid-template-rows: repeat(2, 58px); gap: 6px;
+      justify-content: center;
+    }
+    .controls button { padding: 0; font-size: 24px; background: #1b293b; color: white; }
+    .controls button:active { background: #57f287; color: #07110b; }
+    .up { grid-column: 2; grid-row: 1; }
+    .left { grid-column: 1; grid-row: 2; }
+    .down { grid-column: 2; grid-row: 2; }
+    .right { grid-column: 3; grid-row: 2; }
+    .hint { color: #8492a7; font-size: 12px; line-height: 1.5; margin-top: 16px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>HOMELANDER <span>SNAKE</span></h1>
+  <p class="subtitle">Coma, cresça e bata seu recorde.</p>
+
+  <div class="scores">
+    <div class="score"><small>PONTUAÇÃO</small><strong id="score">0</strong></div>
+    <div class="score"><small>SEU RECORDE</small><strong id="best">0</strong></div>
+  </div>
+
+  <div class="board">
+    <canvas id="game" width="360" height="360"></canvas>
+    <div id="message">
+      <strong>🐍 Snake Game</strong>
+      <span>Prepare-se para jogar!</span>
+    </div>
+  </div>
+
+  <button class="main-button" id="start">▶ COMEÇAR PARTIDA</button>
+
+  <div class="controls">
+    <button class="up" data-dir="up" aria-label="Cima">▲</button>
+    <button class="left" data-dir="left" aria-label="Esquerda">◀</button>
+    <button class="down" data-dir="down" aria-label="Baixo">▼</button>
+    <button class="right" data-dir="right" aria-label="Direita">▶</button>
+  </div>
+
+  <p class="hint">Use os botões ou as setas do teclado.<br>Seu recorde fica salvo neste navegador.</p>
+</main>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const bestEl = document.getElementById("best");
+  const message = document.getElementById("message");
+  const startBtn = document.getElementById("start");
+
+  const cells = 18;
+  const size = canvas.width / cells;
+  let snake, food, direction, nextDirection, score;
+  let turnQueue = [];
+  let running = false;
+  let timer = null;
+  let lastTime = 0;
+
+  let best = 0;
+  try { best = Number(localStorage.getItem("homelanderSnakeBest")) || 0; }
+  catch (_) {}
+  bestEl.textContent = best;
+
+  function placeFood() {
+    const empty = [];
+    for (let y = 0; y < cells; y++) {
+      for (let x = 0; x < cells; x++) {
+        if (!snake.some(p => p.x === x && p.y === y)) empty.push({x, y});
+      }
+    }
+    if (!empty.length) {
+      finish(true);
+      return;
+    }
+    food = empty[Math.floor(Math.random() * empty.length)];
+  }
+
+  function draw() {
+    ctx.fillStyle = "#0c1420";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#142033";
+    ctx.lineWidth = 0.6;
+    for (let i = 0; i <= cells; i++) {
+      ctx.beginPath();
+      ctx.moveTo(i * size, 0);
+      ctx.lineTo(i * size, canvas.height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, i * size);
+      ctx.lineTo(canvas.width, i * size);
+      ctx.stroke();
+    }
+
+    if (food) {
+      ctx.fillStyle = "#ff5c72";
+      ctx.beginPath();
+      ctx.arc((food.x + .5) * size, (food.y + .5) * size, size * .46, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    snake.forEach((p, i) => {
+      ctx.fillStyle = i === 0 ? "#a1ffb8" : "#36cf70";
+      ctx.beginPath();
+      ctx.roundRect(p.x * size + 1, p.y * size + 1, size - 2, size - 2, 4);
+      ctx.fill();
+    });
+
+    if (snake.length) {
+      const head = snake[0];
+      ctx.fillStyle = "#07110b";
+      ctx.beginPath();
+      ctx.arc((head.x + .34) * size, (head.y + .34) * size, 1.7, 0, Math.PI * 2);
+      ctx.arc((head.x + .66) * size, (head.y + .34) * size, 1.7, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function begin() {
+    clearInterval(timer);
+    snake = [
+      {x: 8, y: 9},
+      {x: 7, y: 9},
+      {x: 6, y: 9}
+    ];
+    direction = "right";
+    nextDirection = "right";
+    turnQueue = [];
+    score = 0;
+    food = null;
+    scoreEl.textContent = "0";
+    running = true;
+    lastTime = 0;
+    message.style.display = "none";
+    startBtn.textContent = "↻ REINICIAR PARTIDA";
+    placeFood();
+    draw();
+    updateSpeed();
+  }
+
+  function updateSpeed() {
+    clearInterval(timer);
+    const delay = Math.max(85, 220 - (score / 10) * 8);
+    timer = setInterval(tick, delay);
+  }
+
+  function finish(won = false) {
+    running = false;
+    clearInterval(timer);
+    timer = null;
+    if (score > best) {
+      best = score;
+      bestEl.textContent = best;
+      try { localStorage.setItem("homelanderSnakeBest", String(best)); }
+      catch (_) {}
+    }
+    message.innerHTML = won
+      ? "<strong>🏆 Você venceu!</strong><span>Preencheu todo o tabuleiro.</span>"
+      : "<strong>Fim de jogo!</strong><span>Pontuação: " + score + ". Tente superar seu recorde.</span>";
+    message.style.display = "flex";
+    startBtn.textContent = "▶ JOGAR NOVAMENTE";
+    draw();
+  }
+
+  function tick() {
+    if (!running) return;
+    if (turnQueue.length) nextDirection = turnQueue.shift();
+    direction = nextDirection;
+    const head = {...snake[0]};
+    if (direction === "up") head.y--;
+    if (direction === "down") head.y++;
+    if (direction === "left") head.x--;
+    if (direction === "right") head.x++;
+
+    const eating = food && head.x === food.x && head.y === food.y;
+    const body = eating ? snake : snake.slice(0, -1);
+
+    if (
+      head.x < 0 || head.x >= cells ||
+      head.y < 0 || head.y >= cells ||
+      body.some(p => p.x === head.x && p.y === head.y)
+    ) {
+      finish();
+      return;
+    }
+
+    snake.unshift(head);
+    if (eating) {
+      score += 10;
+      scoreEl.textContent = score;
+      updateSpeed();
+      placeFood();
+      if (score > best) {
+        best = score;
+        bestEl.textContent = best;
+        try { localStorage.setItem("homelanderSnakeBest", String(best)); }
+        catch (_) {}
+      }
+    } else {
+      snake.pop();
+    }
+    draw();
+  }
+
+  function turn(dir) {
+    if (!running) return;
+
+    const opposite = {
+      up: "down", down: "up",
+      left: "right", right: "left"
+    };
+
+    // Impede apenas a inversão direta em relação ao movimento
+    // que será executado no próximo passo.
+    const reference = turnQueue.length
+      ? turnQueue[turnQueue.length - 1]
+      : direction;
+
+    if (dir === opposite[reference]) return;
+    if (dir === reference) return;
+    if (turnQueue.length < 2) turnQueue.push(dir);
+    nextDirection = dir;
+  }
+
+  document.querySelectorAll("[data-dir]").forEach(btn => {
+    btn.addEventListener("pointerdown", e => {
+      e.preventDefault();
+      turn(btn.dataset.dir);
+    });
+  });
+
+  document.addEventListener("keydown", e => {
+    const keys = {
+      ArrowUp: "up", w: "up",
+      ArrowDown: "down", s: "down",
+      ArrowLeft: "left", a: "left",
+      ArrowRight: "right", d: "right"
+    };
+    if (keys[e.key]) {
+      e.preventDefault();
+      turn(keys[e.key]);
+    }
+  });
+
+  startBtn.addEventListener("click", begin);
+
+  snake = [{x: 8, y: 9}, {x: 7, y: 9}, {x: 6, y: 9}];
+  direction = "right";
+  nextDirection = "right";
+  score = 0;
+  placeFood();
+  draw();
+})();
+</script>
+</body>
+</html>
